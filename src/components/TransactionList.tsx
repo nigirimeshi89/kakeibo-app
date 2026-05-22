@@ -7,20 +7,22 @@ import React, { useState, useMemo } from 'react';
 import type { Transaction } from '../types';
 import { CATEGORY_COLOR_MAP, EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '../constants';
 import { CategoryIcon } from './CategoryIcon';
-import { Search, Calendar, Trash2 } from 'lucide-react';
+import { Search, Calendar, Trash2, Download, Upload } from 'lucide-react';
 
 interface TransactionListProps {
     transactions: Transaction[];
     onDeleteTransaction: (id: string) => void;
     selectedCategoryFilter: string | null;
     onClearCategoryFilter: () => void;
+    onImportTransactions: (imported: any[]) => void;
 }
 
 export const TransactionList: React.FC<TransactionListProps> = ({
     transactions,
     onDeleteTransaction,
     selectedCategoryFilter,
-    onClearCategoryFilter
+    onClearCategoryFilter,
+    onImportTransactions
 }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [typeFilter, setTypeFilter] = useState<'all' | 'income' | 'expense'>('all');
@@ -58,6 +60,91 @@ export const TransactionList: React.FC<TransactionListProps> = ({
         });
     }, [transactions, searchTerm, typeFilter, selectedCategoryFilter, monthFilter]);
 
+    // Handle CSV Export with UTF-8 BOM so Excel displays Japanese characters correctly
+    const handleExportCSV = () => {
+        const headers = ['ID', '日付', '取引名', '金額', 'タイプ', 'カテゴリ', 'メモ'];
+        const csvRows = [headers.join(',')];
+
+        transactions.forEach(t => {
+            const row = [
+                t.id,
+                t.date,
+                `"${t.title.replace(/"/g, '""')}"`,
+                t.amount,
+                t.type === 'income' ? '収入' : '支出',
+                `"${t.category.replace(/"/g, '""')}"`,
+                `"${(t.note || '').replace(/"/g, '""')}"`
+            ];
+            csvRows.push(row.join(','));
+        });
+
+        const bom = new Uint8Array([0xEF, 0xBB, 0xBF]); // UTF-8 BOM
+        const blob = new Blob([bom, csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.setAttribute("download", `kakeibo_backup_${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    // Handle CSV Import
+    const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const text = event.target?.result as string;
+                const lines = text.split(/\r?\n/);
+                const imported: Omit<Transaction, 'id'>[] = [];
+
+                for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line) continue;
+
+                    // Simple CSV parsing (handles simple double quotations)
+                    const parts = line.split(',');
+                    if (parts.length < 5) continue;
+
+                    const clean = (str: string) => str.replace(/^"|"$/g, '').replace(/""/g, '"').trim();
+
+                    const date = clean(parts[1] || new Date().toISOString().split('T')[0]);
+                    const title = clean(parts[2] || 'インポートデータ');
+                    const amount = parseFloat(clean(parts[3] || '0')) || 0;
+                    const typeStr = clean(parts[4] || '支出');
+                    const type: 'income' | 'expense' = typeStr === '収入' ? 'income' : 'expense';
+                    const category = clean(parts[5] || 'その他支出');
+                    const note = parts[6] ? clean(parts[6]) : '';
+
+                    imported.push({
+                        date,
+                        title,
+                        amount,
+                        type,
+                        category,
+                        note
+                    });
+                }
+
+                if (imported.length > 0) {
+                    onImportTransactions(imported);
+                    alert(`${imported.length}件の取引データをインポートしました！`);
+                } else {
+                    alert('有効な取引CSVレコードが見つかりませんでした。');
+                }
+            } catch (err) {
+                console.error(err);
+                alert('CSVファイルのパースに失敗しました。フォーマットを確認してください。');
+            }
+        };
+        reader.readAsText(file);
+        // Reset file input so a user can re-import the same file
+        e.target.value = '';
+    };
+
     // Helper properties
     const getCategoryIconName = (categoryName: string, type: 'income' | 'expense') => {
         const list = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
@@ -84,8 +171,33 @@ export const TransactionList: React.FC<TransactionListProps> = ({
                     <p className="text-[10px] text-[#9a9a80]">日々の支出・収入を詳細に絞り込んで一覧を視認・管理できます。</p>
                 </div>
 
-                {/* Filters Panel info alert */}
-                <div className="flex items-center gap-2">
+                {/* CSV and Filters Panel */}
+                <div className="flex flex-wrap items-center gap-2">
+                    {/* CSV Tools */}
+                    <div className="flex items-center gap-1.5 mr-1">
+                        <button
+                            onClick={handleExportCSV}
+                            className="flex items-center gap-1 bg-[#f5f4eb] hover:bg-[#eae9db] border border-[#d6d5c6] text-[#5a5a40] text-[10px] font-bold px-3 py-1.5 rounded-full transition-all cursor-pointer shadow-xs"
+                            title="データをCSVファイルに書き出し"
+                        >
+                            <Download size={11} />
+                            <span>CSV保存</span>
+                        </button>
+                        <label
+                            className="flex items-center gap-1 bg-[#f5f4eb] hover:bg-[#eae9db] border border-[#d6d5c6] text-[#5a5a40] text-[10px] font-bold px-3 py-1.5 rounded-full transition-all cursor-pointer shadow-xs"
+                            title="CSVデータから取引履歴を一括読込"
+                        >
+                            <Upload size={11} />
+                            <span>CSV読込</span>
+                            <input
+                                type="file"
+                                accept=".csv"
+                                onChange={handleImportCSV}
+                                className="hidden"
+                            />
+                        </label>
+                    </div>
+
                     {selectedCategoryFilter && (
                         <div className="flex items-center gap-1.5 bg-[#faf9f2] text-[#5a5a40] px-3.5 py-1.5 rounded-full text-xs font-semibold border border-[#e5e4da] shadow-sm animate-fade-in">
                             <span>カテゴリ: {selectedCategoryFilter}</span>
