@@ -1,0 +1,110 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // 2. Validation Blueprints (The "Anti-Update-Gap")
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt'])
+        && data.keys().size() == 3
+        && data.uid == request.auth.uid
+        && data.email is string
+        && data.email.size() <= 200;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['id', 'title', 'amount', 'type', 'category', 'date'])
+        && data.keys().size() <= 8
+        && data.id is string
+        && data.title is string
+        && data.title.size() <= 200
+        && data.amount is number
+        && data.amount >= 0
+        && (data.type == 'income' || data.type == 'expense')
+        && data.category is string
+        && data.date is string;
+    }
+
+    function isValidSavingsGoal(data) {
+      return data.keys().hasAll(['id', 'title', 'targetAmount', 'currentAmount', 'targetDate'])
+        && data.keys().size() == 5
+        && data.id is string
+        && data.title is string
+        && data.title.size() <= 200
+        && data.targetAmount is number
+        && data.targetAmount >= 0
+        && data.currentAmount is number
+        && data.currentAmount >= 0
+        && data.targetDate is string;
+    }
+
+    function isValidRecurringPayment(data) {
+      return data.keys().hasAll(['id', 'title', 'amount', 'category', 'billingDay', 'isActive'])
+        && data.keys().size() <= 7
+        && data.id is string
+        && data.title is string
+        && data.title.size() <= 200
+        && data.amount is number
+        && data.amount >= 0
+        && data.category is string
+        && data.billingDay is int
+        && data.billingDay >= 1 && data.billingDay <= 31
+        && data.isActive is bool;
+    }
+
+    function isValidCategoryBudget(data) {
+      return data.keys().hasAll(['category', 'budgetAmount'])
+        && data.keys().size() == 2
+        && data.category is string
+        && data.budgetAmount is number
+        && data.budgetAmount >= 0;
+    }
+
+    // Match blocks
+    match /users/{userId} {
+      allow read, delete: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+
+      match /transactions/{transactionId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(transactionId) && isValidTransaction(request.resource.data);
+        allow update: if isOwner(userId) && isValidId(transactionId) && isValidTransaction(request.resource.data) && request.resource.data.id == resource.data.id;
+      }
+
+      match /goals/{goalId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(goalId) && isValidSavingsGoal(request.resource.data);
+        allow update: if isOwner(userId) && isValidId(goalId) && isValidSavingsGoal(request.resource.data) && request.resource.data.id == resource.data.id;
+      }
+
+      match /recurring/{recurringId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(recurringId) && isValidRecurringPayment(request.resource.data);
+        allow update: if isOwner(userId) && isValidId(recurringId) && isValidRecurringPayment(request.resource.data) && request.resource.data.id == resource.data.id;
+      }
+
+      match /budgets/{budgetId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(budgetId) && isValidCategoryBudget(request.resource.data);
+        allow update: if isOwner(userId) && isValidId(budgetId) && isValidCategoryBudget(request.resource.data);
+      }
+    }
+  }
+}

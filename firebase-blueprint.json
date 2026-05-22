@@ -1,0 +1,242 @@
+{
+    "entities": {
+        "User": {
+            "title": "User",
+            "description": "User profile metadata",
+            "type": "object",
+            "properties": {
+                "uid": {
+                    "type": "string",
+                    "description": "The unique user ID from Firebase Auth"
+                },
+                "email": {
+                    "type": "string",
+                    "description": "Email address of the user"
+                },
+                "createdAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Timestamp when the user was created"
+                }
+            },
+            "required": [
+                "uid",
+                "email",
+                "createdAt"
+            ]
+        },
+        "Transaction": {
+            "title": "Transaction",
+            "description": "An individual budget income or expense transaction record",
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Unique identifier of the transaction"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "The description or name of the transaction"
+                },
+                "amount": {
+                    "type": "number",
+                    "description": "The transaction amount in Yen"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "income",
+                        "expense"
+                    ],
+                    "description": "Type of the transaction"
+                },
+                "category": {
+                    "type": "string",
+                    "description": "The visual category name"
+                },
+                "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "The transaction date (YYYY-MM-DD)"
+                },
+                "note": {
+                    "type": "string",
+                    "description": "Optional notes or details"
+                },
+                "isRecurringLog": {
+                    "type": "boolean",
+                    "description": "Whether this transaction was automatically logged from recurring payments"
+                }
+            },
+            "required": [
+                "id",
+                "title",
+                "amount",
+                "type",
+                "category",
+                "date"
+            ]
+        },
+        "SavingsGoal": {
+            "title": "SavingsGoal",
+            "description": "A customized savings target with deadline and progress tracking",
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Unique identifier of the savings goal"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Name of the target saving goal"
+                },
+                "targetAmount": {
+                    "type": "number",
+                    "description": "Goal amount to reach"
+                },
+                "currentAmount": {
+                    "type": "number",
+                    "description": "Current saved amount"
+                },
+                "targetDate": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Target completion date (YYYY-MM-DD)"
+                }
+            },
+            "required": [
+                "id",
+                "title",
+                "targetAmount",
+                "currentAmount",
+                "targetDate"
+            ]
+        },
+        "RecurringPayment": {
+            "title": "RecurringPayment",
+            "description": "A fixed and recurring monthly automation item",
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Unique identifier of the recurring config"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "The recurring bill title"
+                },
+                "amount": {
+                    "type": "number",
+                    "description": "Periodic charge amount"
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Category for tracking"
+                },
+                "billingDay": {
+                    "type": "number",
+                    "description": "The day of the month when billing occurs (1-31)"
+                },
+                "isActive": {
+                    "type": "boolean",
+                    "description": "Whether the automation is active"
+                },
+                "lastPaidMonth": {
+                    "type": "string",
+                    "description": "The last paid month in YYYY-MM format"
+                }
+            },
+            "required": [
+                "id",
+                "title",
+                "amount",
+                "category",
+                "billingDay",
+                "isActive"
+            ]
+        },
+        "CategoryBudget": {
+            "title": "CategoryBudget",
+            "description": "A visual target budget set per category",
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "The tracking category name"
+                },
+                "budgetAmount": {
+                    "type": "number",
+                    "description": "The set budget amount for the category"
+                }
+            },
+            "required": [
+                "category",
+                "budgetAmount"
+            ]
+        },
+        "QuickTemplate": {
+            "title": "QuickTemplate",
+            "description": "Favorite quick-spending patterns with descriptive shortcuts",
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Unique identifier of the quick template"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Name of the template (e.g. Always Coffee)"
+                },
+                "amount": {
+                    "type": "number",
+                    "description": "Quick fill amount"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "income",
+                        "expense"
+                    ],
+                    "description": "Type of fast entry"
+                },
+                "category": {
+                    "type": "string",
+                    "description": "The category pre-selection"
+                }
+            },
+            "required": [
+                "id",
+                "title",
+                "amount",
+                "type",
+                "category"
+            ]
+        }
+    },
+    "firestore": {
+        "/users/{userId}": {
+            "schema": "User",
+            "description": "User profile with identification details"
+        },
+        "/users/{userId}/transactions/{transactionId}": {
+            "schema": "Transaction",
+            "description": "The transactions associated with the user"
+        },
+        "/users/{userId}/goals/{goalId}": {
+            "schema": "SavingsGoal",
+            "description": "The savings goals of the user"
+        },
+        "/users/{userId}/recurring/{recurringId}": {
+            "schema": "RecurringPayment",
+            "description": "Recurring fixed charge automated items per user"
+        },
+        "/users/{userId}/budgets/{budgetId}": {
+            "schema": "CategoryBudget",
+            "description": "Personal budget settings set for each category by the user"
+        },
+        "/users/{userId}/templates/{templateId}": {
+            "schema": "QuickTemplate",
+            "description": "Fast templates representing frequent one-tap entries"
+        }
+    }
+}
