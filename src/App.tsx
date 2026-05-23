@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import type { Transaction, SavingsGoal, RecurringPayment, CategoryBudget, QuickTemplate } from './types';
 import {
@@ -26,22 +26,12 @@ import {
   Sparkles,
   PieChart as PieIcon,
   ListOrdered,
-  Target,
   CreditCard,
   Target as TargetIcon,
   Calendar as CalIcon,
-  LogIn,
-  LogOut,
-  Cloud,
   ShieldCheck,
-  X,
   Loader2
 } from 'lucide-react';
-
-// Firebase Integrations
-import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
-import { doc, setDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
-import { auth, db, signInWithGoogle, logoutUser } from './firebase';
 
 export default function App() {
   const [transactions, setTransactions] = useLocalStorage<Transaction[]>(
@@ -65,11 +55,6 @@ export default function App() {
     INITIAL_QUICK_TEMPLATES
   );
 
-  // Authentication & Cloud Sync flags
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [isLoadingCloud, setIsLoadingCloud] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-
   // Switch between tabs/views
   const [activeSection, setActiveSection] = useState<'dashboard' | 'transactions' | 'goals' | 'recurring' | 'calendar'>('dashboard');
 
@@ -78,128 +63,6 @@ export default function App() {
 
   // Shared filtering state
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string | null>(null);
-
-  // Sync state with cloud when authenticated
-  const syncWithFirestoreOnLogin = async (user: any) => {
-    setIsLoadingCloud(true);
-    try {
-      // 1. Create/merge user document logs
-      const userRef = doc(db, 'users', user.uid);
-      await setDoc(userRef, {
-        uid: user.uid,
-        email: user.email || 'guest_user',
-        createdAt: new Date().toISOString()
-      }, { merge: true });
-
-      // 2. Fetch Transactions from Cloud
-      const txsSnap = await getDocs(collection(db, 'users', user.uid, 'transactions'));
-      const firestoreTxs: Transaction[] = [];
-      txsSnap.forEach(docSnap => {
-        firestoreTxs.push(docSnap.data() as Transaction);
-      });
-
-      // 3. Fetch Goals
-      const goalsSnap = await getDocs(collection(db, 'users', user.uid, 'goals'));
-      const firestoreGoals: SavingsGoal[] = [];
-      goalsSnap.forEach(docSnap => {
-        firestoreGoals.push(docSnap.data() as SavingsGoal);
-      });
-
-      // 4. Fetch Recurring payments
-      const recurSnap = await getDocs(collection(db, 'users', user.uid, 'recurring'));
-      const firestoreRecur: RecurringPayment[] = [];
-      recurSnap.forEach(docSnap => {
-        firestoreRecur.push(docSnap.data() as RecurringPayment);
-      });
-
-      // 5. Fetch Budgets
-      const budgetsSnap = await getDocs(collection(db, 'users', user.uid, 'budgets'));
-      const firestoreBudgets: CategoryBudget[] = [];
-      budgetsSnap.forEach(docSnap => {
-        firestoreBudgets.push(docSnap.data() as CategoryBudget);
-      });
-
-      // 6. Fetch Quick Templates
-      const templatesSnap = await getDocs(collection(db, 'users', user.uid, 'templates'));
-      const firestoreTemplates: QuickTemplate[] = [];
-      templatesSnap.forEach(docSnap => {
-        firestoreTemplates.push(docSnap.data() as QuickTemplate);
-      });
-
-      const hasCloudData = firestoreTxs.length > 0 || firestoreGoals.length > 0 || firestoreRecur.length > 0 || firestoreBudgets.length > 0 || firestoreTemplates.length > 0;
-
-      if (hasCloudData) {
-        // If firestore has cloud data, replace current local assets
-        console.log('Loading cloud records as source of truth...');
-        setTransactions(firestoreTxs.sort((a, b) => b.date.localeCompare(a.date)));
-        setGoals(firestoreGoals);
-        setRecurringPayments(firestoreRecur);
-        setBudgets(firestoreBudgets);
-        setQuickTemplates(firestoreTemplates.length > 0 ? firestoreTemplates : INITIAL_QUICK_TEMPLATES);
-      } else {
-        // If cloud is empty, upload existing local assets to back up user workflow
-        console.log('Synchronizing local records into empty cloud profile...');
-
-        // Upload transactions
-        for (const tx of transactions) {
-          await setDoc(doc(db, 'users', user.uid, 'transactions', tx.id), tx);
-        }
-
-        // Upload goals with stable IDs
-        const goalsWithIds = goals.map((g, idx) => ({
-          ...g,
-          id: g.id || `goal_${Date.now()}_${idx}`
-        }));
-        setGoals(goalsWithIds);
-        for (const goal of goalsWithIds) {
-          await setDoc(doc(db, 'users', user.uid, 'goals', goal.id), goal);
-        }
-
-        // Upload recurrings
-        for (const rec of recurringPayments) {
-          await setDoc(doc(db, 'users', user.uid, 'recurring', rec.id), rec);
-        }
-
-        // Upload budgets
-        for (const b of budgets) {
-          await setDoc(doc(db, 'users', user.uid, 'budgets', b.category), b);
-        }
-
-        // Upload quick templates
-        for (const t of quickTemplates) {
-          await setDoc(doc(db, 'users', user.uid, 'templates', t.id), t);
-        }
-      }
-    } catch (err) {
-      console.error('Error during Firestore data orchestration:', err);
-    } finally {
-      setIsLoadingCloud(false);
-    }
-  };
-
-  // Auth Status listener
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      if (user) {
-        syncWithFirestoreOnLogin(user);
-      } else {
-        // Restores sandbox offline data on logout
-        const localTxs = localStorage.getItem('money_manager_transactions_v2');
-        const localGoals = localStorage.getItem('money_manager_goals_v2');
-        const localRecur = localStorage.getItem('money_manager_recurring_v2');
-        const localBudgets = localStorage.getItem('money_manager_budgets_v2');
-        const localTemplates = localStorage.getItem('money_manager_quick_templates_v2');
-
-        setTransactions(localTxs ? JSON.parse(localTxs) : INITIAL_TRANSACTIONS);
-        setGoals(localGoals ? JSON.parse(localGoals) : INITIAL_SAVINGS_GOALS);
-        setRecurringPayments(localRecur ? JSON.parse(localRecur) : INITIAL_RECURRING_PAYMENTS);
-        setBudgets(localBudgets ? JSON.parse(localBudgets) : []);
-        setQuickTemplates(localTemplates ? JSON.parse(localTemplates) : INITIAL_QUICK_TEMPLATES);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
 
   // Calculations for total balances
   const totalIncome = transactions
@@ -212,39 +75,23 @@ export default function App() {
 
   const currentBalance = totalIncome - totalExpense;
 
-  // Handles adding transaction with Firestore Sync
-  const handleAddTransaction = async (newTx: Omit<Transaction, 'id'>) => {
+  // Handles adding transaction locally
+  const handleAddTransaction = (newTx: Omit<Transaction, 'id'>) => {
     const id = 'tx_' + Date.now();
     const tx: Transaction = {
       ...newTx,
       id
     };
     setTransactions([tx, ...transactions]);
-
-    if (auth.currentUser) {
-      try {
-        await setDoc(doc(db, 'users', auth.currentUser.uid, 'transactions', id), tx);
-      } catch (err) {
-        console.error('Failed to write transaction to Firestore:', err);
-      }
-    }
   };
 
-  // Handles deleting transaction with Firestore Sync
-  const handleDeleteTransaction = async (id: string) => {
+  // Handles deleting transaction locally
+  const handleDeleteTransaction = (id: string) => {
     setTransactions(transactions.filter((t) => t.id !== id));
-
-    if (auth.currentUser) {
-      try {
-        await deleteDoc(doc(db, 'users', auth.currentUser.uid, 'transactions', id));
-      } catch (err) {
-        console.error('Failed to delete transaction from Firestore:', err);
-      }
-    }
   };
 
-  // Handles Saving Goals list with Firestore Sync
-  const handleSetGoals = async (newGoals: SavingsGoal[]) => {
+  // Handles Saving Goals list locally
+  const handleSetGoals = (newGoals: SavingsGoal[]) => {
     const goalsWithIds = newGoals.map((g, idx) => {
       if (!g.id) {
         return { ...g, id: `goal_${Date.now()}_${idx}` };
@@ -253,47 +100,15 @@ export default function App() {
     });
 
     setGoals(goalsWithIds);
-
-    if (auth.currentUser) {
-      try {
-        for (const goal of goalsWithIds) {
-          await setDoc(doc(db, 'users', auth.currentUser.uid, 'goals', goal.id!), goal);
-        }
-
-        const newIds = new Set(goalsWithIds.map(g => g.id));
-        const deletedGoals = goals.filter(g => g.id && !newIds.has(g.id));
-        for (const oldGoal of deletedGoals) {
-          await deleteDoc(doc(db, 'users', auth.currentUser.uid, 'goals', oldGoal.id!));
-        }
-      } catch (err) {
-        console.error('Failed to sync goals change to Firestore:', err);
-      }
-    }
   };
 
-  // Handles Recurring payments list with Firestore Sync
-  const handleSetRecurringPayments = async (newRecurrings: RecurringPayment[]) => {
+  // Handles Recurring payments list locally
+  const handleSetRecurringPayments = (newRecurrings: RecurringPayment[]) => {
     setRecurringPayments(newRecurrings);
-
-    if (auth.currentUser) {
-      try {
-        for (const rec of newRecurrings) {
-          await setDoc(doc(db, 'users', auth.currentUser.uid, 'recurring', rec.id), rec);
-        }
-
-        const newIds = new Set(newRecurrings.map(r => r.id));
-        const deletedRecurrings = recurringPayments.filter(r => !newIds.has(r.id));
-        for (const oldRec of deletedRecurrings) {
-          await deleteDoc(doc(db, 'users', auth.currentUser.uid, 'recurring', oldRec.id));
-        }
-      } catch (err) {
-        console.error('Failed to sync recurring items to Firestore:', err);
-      }
-    }
   };
 
-  // Handles category budgets with Firestore Sync
-  const handleSetCategoryBudget = async (category: string, amount: number) => {
+  // Handles category budgets locally
+  const handleSetCategoryBudget = (category: string, amount: number) => {
     const existingIdx = budgets.findIndex(b => b.category === category);
     let updated: CategoryBudget[] = [];
     if (existingIdx >= 0) {
@@ -304,21 +119,10 @@ export default function App() {
     }
 
     setBudgets(updated);
-
-    if (auth.currentUser) {
-      try {
-        await setDoc(doc(db, 'users', auth.currentUser.uid, 'budgets', category), {
-          category,
-          budgetAmount: amount
-        });
-      } catch (err) {
-        console.error('Failed to sync category budget to Firestore:', err);
-      }
-    }
   };
 
   // Handles favorite template additions
-  const handleAddQuickTemplate = async (newTpl: Omit<QuickTemplate, 'id'>) => {
+  const handleAddQuickTemplate = (newTpl: Omit<QuickTemplate, 'id'>) => {
     const id = 'q_' + Date.now();
     const tpl: QuickTemplate = {
       ...newTpl,
@@ -326,32 +130,16 @@ export default function App() {
     };
     const updated = [...quickTemplates, tpl];
     setQuickTemplates(updated);
-
-    if (auth.currentUser) {
-      try {
-        await setDoc(doc(db, 'users', auth.currentUser.uid, 'templates', id), tpl);
-      } catch (err) {
-        console.error('Failed to write quick template to Firestore:', err);
-      }
-    }
   };
 
   // Handles favorite template deletions
-  const handleDeleteQuickTemplate = async (id: string) => {
+  const handleDeleteQuickTemplate = (id: string) => {
     const updated = quickTemplates.filter(t => t.id !== id);
     setQuickTemplates(updated);
-
-    if (auth.currentUser) {
-      try {
-        await deleteDoc(doc(db, 'users', auth.currentUser.uid, 'templates', id));
-      } catch (err) {
-        console.error('Failed to delete quick template from Firestore:', err);
-      }
-    }
   };
 
-  // CSV Import handler to bulk-inject records
-  const handleImportTransactions = async (imported: Omit<Transaction, 'id'>[]) => {
+  // CSV Import handler to bulk-inject records locally
+  const handleImportTransactions = (imported: Omit<Transaction, 'id'>[]) => {
     const newTxs: Transaction[] = [];
     for (let i = 0; i < imported.length; i++) {
       const id = 'tx_imported_' + Date.now() + '_' + i;
@@ -360,14 +148,6 @@ export default function App() {
         id
       };
       newTxs.push(tx);
-
-      if (auth.currentUser) {
-        try {
-          await setDoc(doc(db, 'users', auth.currentUser.uid, 'transactions', id), tx);
-        } catch (err) {
-          console.error('Failed to write imported transaction to Cloud:', err);
-        }
-      }
     }
     setTransactions(prev => [...newTxs, ...prev]);
   };
@@ -377,20 +157,6 @@ export default function App() {
     setSelectedCategoryFilter(category);
     if (category) {
       setActiveSection('transactions'); // Auto-switch to view transactions when filtered
-    }
-  };
-
-  // Trigger guest login without popup blocking bugs
-  const handleGuestLogin = async () => {
-    try {
-      setIsLoadingCloud(true);
-      setShowAuthModal(false);
-      await signInAnonymously(auth);
-    } catch (err) {
-      console.error('Guest signing error:', err);
-      alert('自動テスト用の接続に失敗しました。');
-    } finally {
-      setIsLoadingCloud(false);
     }
   };
 
@@ -405,9 +171,6 @@ export default function App() {
       setQuickTemplates(INITIAL_QUICK_TEMPLATES);
       setSelectedCategoryFilter(null);
       setActiveSection('dashboard');
-      if (auth.currentUser) {
-        logoutUser();
-      }
     }
   };
 
@@ -435,31 +198,11 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Real-time sync connection indicator */}
-            {currentUser ? (
-              <div className="flex items-center gap-2 bg-white/80 border border-[#e5e4da] px-3.5 py-1.5 rounded-full text-xs shadow-xs">
-                <ShieldCheck size={14} className="text-green-600 animate-pulse" />
-                <span className="text-[10px] text-[#7a7a60] max-w-[80px] sm:max-w-[120px] truncate" title={currentUser.email}>
-                  {currentUser.isAnonymous ? 'ゲスト同期中' : currentUser.email}
-                </span>
-                <button
-                  onClick={logoutUser}
-                  className="text-amber-700 hover:text-red-600 font-bold ml-1 text-[11px] cursor-pointer"
-                  title="クラウドからサインアウト"
-                >
-                  <LogOut size={12} className="inline mr-0.5" />
-                  切断
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowAuthModal(true)}
-                className="flex items-center gap-1.5 text-xs font-bold text-[#5a5a40] hover:text-white bg-white hover:bg-[#5a5a40] ring-1 ring-[#e5e4da] px-4 py-2 rounded-full transition-all cursor-pointer shadow-xs"
-              >
-                <Cloud size={13} />
-                <span>クラウド同期</span>
-              </button>
-            )}
+            {/* Safe Local Storage Indicator */}
+            <div className="flex items-center gap-1.5 bg-white/80 border border-[#e5e4da] px-3.5 py-1.5 rounded-full text-xs shadow-xs text-[#7a7a60]" title="この端末のブラウザに、データが自動的にローカル保存されています。クラウドサーバーを介さないため安心・高速です。">
+              <ShieldCheck size={14} className="text-[#5a5a40]" />
+              <span className="text-[10px] font-bold">ローカル自動保存中</span>
+            </div>
 
             <button
               onClick={handleResetData}
@@ -472,71 +215,6 @@ export default function App() {
           </div>
         </div>
       </header>
-
-      {/* Cloud Synchronizing Screen Overlay */}
-      {isLoadingCloud && (
-        <div className="fixed inset-0 bg-[#fdfcf8]/90 backdrop-blur-md z-50 flex flex-col items-center justify-center gap-4">
-          <Loader2 size={40} className="text-[#5a5a40] animate-spin" />
-          <h4 className="font-serif font-black text-base text-[#5a5a40]">クラウドのデータをロード中...</h4>
-          <p className="text-[11px] text-[#9a9a80]">数ミリ秒でお洒落なマイウォレットを開放します。</p>
-        </div>
-      )}
-
-      {/* Custom Sync Authentication Popup Modal */}
-      {showAuthModal && (
-        <div className="fixed inset-0 bg-black/45 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-[#e5e4da] max-w-sm w-full rounded-3xl p-6 shadow-2xl relative animate-scale-up">
-            <button
-              onClick={() => setShowAuthModal(false)}
-              className="absolute right-4 top-4 p-2 text-[#9a9a80] hover:text-[#3d3d3d] rounded-full hover:bg-gray-100 cursor-pointer"
-            >
-              <X size={16} />
-            </button>
-
-            <div className="text-center space-y-2 mb-6">
-              <div className="w-12 h-12 bg-[#faf9f2] text-[#5a5a40] rounded-2xl flex items-center justify-center mx-auto shadow-xs">
-                <Cloud size={24} />
-              </div>
-              <h3 className="font-serif font-black text-lg text-[#3d3d3d]">クラウドで安全に自動同期</h3>
-              <p className="text-xs text-[#9a9a80] leading-relaxed">
-                ログインすることで家計簿の全記録が自動的にクラウドへ保存され、複数端末や新しいスマホでもすぐに見られるようになります。
-              </p>
-            </div>
-
-            <div className="space-y-2.5">
-              <button
-                onClick={async () => {
-                  try {
-                    setShowAuthModal(false);
-                    setIsLoadingCloud(true);
-                    await signInWithGoogle();
-                  } catch (e) {
-                    alert('ポップアップが制限されています。代わりに「ワンクリック瞬時同期」をお使いください。');
-                  } finally {
-                    setIsLoadingCloud(false);
-                  }
-                }}
-                className="w-full flex items-center justify-center gap-2 bg-white hover:bg-[#faf9f2] ring-1 ring-[#e5e4da] text-[#3d3d3d] font-bold text-xs py-3 rounded-2xl cursor-pointer transition-all shadow-sm"
-              >
-                <LogIn size={14} className="text-[#5a5a40]" />
-                <span>Googleでログイン・新規登録</span>
-              </button>
-
-              <button
-                onClick={handleGuestLogin}
-                className="w-full flex items-center justify-center gap-2 bg-[#5a5a40] hover:bg-[#4a4a35] text-white font-bold text-xs py-3 rounded-2xl cursor-pointer transition-all shadow-md"
-              >
-                <Cloud size={14} />
-                <span>ポップアップ不要で同期 (ワンクリック)</span>
-              </button>
-            </div>
-
-            <p className="text-[9px] text-[#9a9a80] text-center mt-4">
-              ※ ポップアップ規制のあるブラウザやアプリ内プレビューでも「ワンクリック同期」なら確実にクラウドが機能します。
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Main Wrapper Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
@@ -606,8 +284,8 @@ export default function App() {
           <button
             onClick={() => setActiveSection('dashboard')}
             className={`flex items-center gap-2 px-6 py-3 font-sans font-bold text-xs rounded-t-2xl transition-all border-b-2 whitespace-nowrap cursor-pointer ${activeSection === 'dashboard'
-              ? 'border-[#5a5a40] text-[#5a5a40] bg-white shadow-sm font-extrabold'
-              : 'border-transparent text-[#7a7a60] hover:text-[#5a5a40] hover:bg-[#e8e7dd]/30'
+                ? 'border-[#5a5a40] text-[#5a5a40] bg-white shadow-sm font-extrabold'
+                : 'border-transparent text-[#7a7a60] hover:text-[#5a5a40] hover:bg-[#e8e7dd]/30'
               }`}
           >
             <PieIcon size={14} />
@@ -616,8 +294,8 @@ export default function App() {
           <button
             onClick={() => setActiveSection('transactions')}
             className={`flex items-center gap-2 px-6 py-3 font-sans font-bold text-xs rounded-t-2xl transition-all border-b-2 whitespace-nowrap cursor-pointer ${activeSection === 'transactions'
-              ? 'border-[#5a5a40] text-[#5a5a40] bg-white shadow-sm font-extrabold'
-              : 'border-transparent text-[#7a7a60] hover:text-[#5a5a40] hover:bg-[#e8e7dd]/30'
+                ? 'border-[#5a5a40] text-[#5a5a40] bg-white shadow-sm font-extrabold'
+                : 'border-transparent text-[#7a7a60] hover:text-[#5a5a40] hover:bg-[#e8e7dd]/30'
               }`}
           >
             <ListOrdered size={14} />
@@ -626,8 +304,8 @@ export default function App() {
           <button
             onClick={() => setActiveSection('calendar')}
             className={`flex items-center gap-2 px-6 py-3 font-sans font-bold text-xs rounded-t-2xl transition-all border-b-2 whitespace-nowrap cursor-pointer ${activeSection === 'calendar'
-              ? 'border-[#5a5a40] text-[#5a5a40] bg-white shadow-sm font-extrabold'
-              : 'border-transparent text-[#7a7a60] hover:text-[#5a5a40] hover:bg-[#e8e7dd]/30'
+                ? 'border-[#5a5a40] text-[#5a5a40] bg-white shadow-sm font-extrabold'
+                : 'border-transparent text-[#7a7a60] hover:text-[#5a5a40] hover:bg-[#e8e7dd]/30'
               }`}
           >
             <CalIcon size={14} />
@@ -636,8 +314,8 @@ export default function App() {
           <button
             onClick={() => setActiveSection('goals')}
             className={`flex items-center gap-2 px-6 py-3 font-sans font-bold text-xs rounded-t-2xl transition-all border-b-2 whitespace-nowrap cursor-pointer ${activeSection === 'goals'
-              ? 'border-[#5a5a40] text-[#5a5a40] bg-white shadow-sm font-extrabold'
-              : 'border-transparent text-[#7a7a60] hover:text-[#5a5a40] hover:bg-[#e8e7dd]/30'
+                ? 'border-[#5a5a40] text-[#5a5a40] bg-white shadow-sm font-extrabold'
+                : 'border-transparent text-[#7a7a60] hover:text-[#5a5a40] hover:bg-[#e8e7dd]/30'
               }`}
           >
             <TargetIcon size={14} />
@@ -646,8 +324,8 @@ export default function App() {
           <button
             onClick={() => setActiveSection('recurring')}
             className={`flex items-center gap-2 px-6 py-3 font-sans font-bold text-xs rounded-t-2xl transition-all border-b-2 whitespace-nowrap cursor-pointer ${activeSection === 'recurring'
-              ? 'border-[#5a5a40] text-[#5a5a40] bg-white shadow-sm font-extrabold'
-              : 'border-transparent text-[#7a7a60] hover:text-[#5a5a40] hover:bg-[#e8e7dd]/30'
+                ? 'border-[#5a5a40] text-[#5a5a40] bg-white shadow-sm font-extrabold'
+                : 'border-transparent text-[#7a7a60] hover:text-[#5a5a40] hover:bg-[#e8e7dd]/30'
               }`}
           >
             <CreditCard size={14} />
